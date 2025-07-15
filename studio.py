@@ -115,6 +115,9 @@ parser.add_argument("--port", type=int, required=False)
 parser.add_argument("--inbrowser", action='store_true')
 parser.add_argument("--lora", type=str, default=None, help="Lora path (comma separated for multiple)")
 parser.add_argument("--offline", action='store_true', help="Run in offline mode")
+parser.add_argument('--ssl-certfile", type=str, default='')
+parser.add_argument('--ssl-keyfile', type=str, default='')
+parser.add_argument('--ssl-verify', type=str, default='false')
 args = parser.parse_args()
 
 print(args)
@@ -702,4 +705,7 @@ interface.launch(
     share=args.share,
     inbrowser=args.inbrowser,
     allowed_paths=[settings.get("output_dir"), settings.get("metadata_dir")],
+    ssl_certfile=args.ssl_certfile,
+    ssl_keyfile=args.ssl_keyfile,
+    ssl_verify=False,
 )
