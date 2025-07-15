@@ -117,7 +117,8 @@ parser.add_argument("--lora", type=str, default=None, help="Lora path (comma sep
 parser.add_argument("--offline", action='store_true', help="Run in offline mode")
 parser.add_argument('--ssl-certfile', type=str, default='')
 parser.add_argument('--ssl-keyfile', type=str, default='')
-parser.add_argument('--ssl-verify', type=str, default='false')
+parser.add_argument('--ssl-verify', type=str, default=False)
+parser.add_argument('--init', type=str, default=False, help="Downloads components but doesn't launch web server, for use with docker builds")
 args = parser.parse_args()
 
 print(args)
@@ -698,14 +699,25 @@ interface = create_interface(
     lora_names=lora_names # Explicitly pass the found LoRA names
 )
 
+if args.init:
+    print("Init mode enabled. Exiting after setup.")
+    exit(0)
+
+launch_kwargs = {
+    "server_name": args.server,
+    "server_port": args.port,
+    "share": args.share,
+    "inbrowser": args.inbrowser,
+    "allowed_paths": [settings.get("output_dir"), settings.get("metadata_dir")],
+    "ssl_verify": False,
+}
+
+if os.path.isfile(args.ssl_certfile) and os.path.isfile(args.ssl_keyfile):
+    launch_kwargs["ssl_certfile"] = args.ssl_certfile
+    launch_kwargs["ssl_keyfile"] = args.ssl_keyfile
+    print(f"SSL enabled with cert: {args.ssl_certfile}, key: {args.ssl_keyfile}")
+else:
+    print("SSL disabled: cert/key files not found")
+
 # Launch the interface
-interface.launch(
-    server_name=args.server,
-    server_port=args.port,
-    share=args.share,
-    inbrowser=args.inbrowser,
-    allowed_paths=[settings.get("output_dir"), settings.get("metadata_dir")],
-    ssl_certfile=args.ssl_certfile,
-    ssl_keyfile=args.ssl_keyfile,
-    ssl_verify=False,
-)
+interface.launch( **launch_kwargs )
