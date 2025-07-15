@@ -1,12 +1,6 @@
 import torch
 import math
 
-def get_preferred_dtype():
-    return torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
-
-PREFERRED_DTYPE = get_preferred_dtype()
-
-    
 from diffusers_helper.k_diffusion.uni_pc_fm import sample_unipc
 from diffusers_helper.k_diffusion.wrapper import fm_wrapper
 from diffusers_helper.utils import repeat_to_batch_size
@@ -53,7 +47,7 @@ def sample_hunyuan(
         negative_prompt_embeds=None,
         negative_prompt_embeds_mask=None,
         negative_prompt_poolers=None,
-        dtype=PREFERRED_DTYPE,
+        dtype=torch.bfloat16,
         device=None,
         negative_kwargs=None,
         callback=None,
