@@ -1,8 +1,38 @@
+import os
 import torch
 import math
 
 def get_preferred_dtype():
-    return torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    override = os.getenv("DTYPE_OVERRIDE", "").lower().strip()
+    supported_dtypes = {
+        "fp32": torch.float32,
+        "float32": torch.float32,
+        "fp16": torch.float16,
+        "float16": torch.float16,
+        "bf16": torch.bfloat16,
+        "bfloat16": torch.bfloat16,
+    }
+
+    if override:
+        if override in supported_dtypes:
+            dtype = supported_dtypes[override]
+            # Warn if override is bf16 but unsupported
+            if dtype == torch.bfloat16 and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
+                print("⚠️  DTYPE_OVERRIDE='bf16' requested but bfloat16 is not supported on this device. Falling back to float32.")
+                return torch.float32
+            print(f"📦 DTYPE_OVERRIDE='{override}' applied: using {dtype}")
+            return dtype
+        else:
+            print(f"⚠️  DTYPE_OVERRIDE='{override}' is invalid. Valid options: fp32, fp16, bf16. Ignoring override.")
+
+    # Auto-detect
+    if torch.cuda.is_available():
+        if torch.cuda.is_bf16_supported():
+            return torch.bfloat16
+        else:
+            return torch.float16
+    else:
+        return torch.float32
 
 PREFERRED_DTYPE = get_preferred_dtype()
 

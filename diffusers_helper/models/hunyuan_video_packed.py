@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import os
 import torch
 import einops
 import torch.nn as nn
@@ -56,36 +57,91 @@ try:
 except:
     pass
 
+# Read environment overrides
+FORCE_ATTENTION = os.getenv("FORCE_ATTENTION", "").lower().strip()
+DISABLE_SAGEATTN = os.getenv("DISABLE_SAGEATTN", "false").lower() == "true"
+DISABLE_FLASHATTN = os.getenv("DISABLE_FLASHATTN", "false").lower() == "true"
+DISABLE_XFORMERS = os.getenv("DISABLE_XFORMERS", "false").lower() == "true"
+
+# Detect support
+support_sage = sageattn is not None and sageattn_varlen is not None
+support_flash = flash_attn_func is not None and flash_attn_varlen_func is not None
+support_xformers = xformers_attn_func is not None
+
+# Apply disable flags
+enabled_sage = support_sage and not DISABLE_SAGEATTN
+enabled_flash = support_flash and not DISABLE_FLASHATTN
+enabled_xformers = support_xformers and not DISABLE_XFORMERS
+
 # --- Attention Summary ---
 print("\n--- Attention Configuration ---")
-has_sage = sageattn is not None and sageattn_varlen is not None
-has_flash = flash_attn_func is not None and flash_attn_varlen_func is not None
-has_xformers = xformers_attn_func is not None
 
-if has_sage:
-    print("✅  Using SAGE Attention (highest performance).")
-    ignored = []
-    if has_flash:
-        ignored.append("Flash Attention")
-    if has_xformers:
-        ignored.append("xFormers")
-    if ignored:
-        print(f"   - Ignoring other installed attention libraries: {', '.join(ignored)}")
-elif has_flash:
-    print("✅  Using Flash Attention (high performance).")
-    if has_xformers:
-        print("   - Consider installing SAGE Attention for highest performance.")
-        print("   - Ignoring other installed attention library: xFormers")
-elif has_xformers:
-    print("✅  Using xFormers.")
-    print("   - Consider installing SAGE Attention for highest performance.")
-    print("   - or Consider installing Flash Attention for high performance.")
+def print_status(name, supported, disabled):
+    if supported:
+        if disabled:
+            print(f"🛑  {name:<15} is supported but disabled via environment variable.")
+        else:
+            print(f"✅  {name:<15} is supported and enabled.")
+    else:
+        print(f"❌  {name:<15} is not supported.")
+
+print_status("SAGE Attention", support_sage, DISABLE_SAGEATTN)
+print_status("Flash Attention", support_flash, DISABLE_FLASHATTN)
+print_status("xFormers", support_xformers, DISABLE_XFORMERS)
+print()
+
+# --- Selection Logic ---
+selected_attention = None
+
+# Forced override
+if FORCE_ATTENTION:
+    if FORCE_ATTENTION == "sage" and enabled_sage:
+        selected_attention = "SAGE"
+    elif FORCE_ATTENTION == "flash" and enabled_flash:
+        selected_attention = "Flash"
+    elif FORCE_ATTENTION == "xformers" and enabled_xformers:
+        selected_attention = "xFormers"
+    else:
+        print(f"❌ FORCE_ATTENTION='{FORCE_ATTENTION}' is not supported or disabled. Ignoring override.")
+
+# Auto-select by priority
+if not selected_attention:
+    if enabled_sage:
+        selected_attention = "SAGE"
+    elif enabled_flash:
+        selected_attention = "Flash"
+    elif enabled_xformers:
+        selected_attention = "xFormers"
+
+# Output final selection
+if selected_attention == "SAGE":
+    print("🔷 Using SAGE Attention (highest performance).")
+    if enabled_flash or enabled_xformers:
+        ignored = []
+        if enabled_flash: ignored.append("Flash Attention")
+        if enabled_xformers: ignored.append("xFormers")
+        print(f"   - Ignoring other enabled attention libraries: {', '.join(ignored)}")
+elif selected_attention == "Flash":
+    print("🔷 Using Flash Attention (high performance).")
+    if enabled_xformers:
+        print("   - Ignoring enabled library: xFormers")
+    if support_sage and DISABLE_SAGEATTN:
+        print("   - SAGE Attention is available but disabled via env var.")
+elif selected_attention == "xFormers":
+    print("🔷 Using xFormers Attention (moderate performance).")
+    if support_sage and DISABLE_SAGEATTN:
+        print("   - SAGE Attention is available but disabled via env var.")
+    if support_flash and DISABLE_FLASHATTN:
+        print("   - Flash Attention is available but disabled via env var.")
 else:
-    print("⚠️  No attention library found. Using native PyTorch Scaled Dot Product Attention.")
-    print("   - For better performance, consider installing one of:")
-    print("     SAGE Attention (highest performance), Flash Attention (high performance), or xFormers.")
-print("-------------------------------\n")
+    print("⚠️  No accelerated attention library enabled.")
+    print("   - Falling back to PyTorch native Scaled Dot Product Attention.")
+    print("   - To improve performance, install and enable:")
+    print("     - SAGE Attention (highest performance)")
+    print("     - Flash Attention (high performance)")
+    print("     - xFormers (moderate performance)")
 
+print("-------------------------------\n")
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
