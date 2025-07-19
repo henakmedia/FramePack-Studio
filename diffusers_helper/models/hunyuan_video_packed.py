@@ -191,36 +191,48 @@ def apply_rotary_emb_transposed(x, freqs_cis):
 
 
 def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv):
+    def pad_to_multiple(tensor, multiple=128):
+        seq_len = tensor.shape[1]
+        pad_len = (multiple - seq_len % multiple) % multiple
+        if pad_len > 0:
+            pad = torch.zeros(tensor.shape[0], pad_len, *tensor.shape[2:], dtype=tensor.dtype, device=tensor.device)
+            tensor = torch.cat([tensor, pad], dim=1)
+        return tensor, seq_len
+
     if cu_seqlens_q is None and cu_seqlens_kv is None and max_seqlen_q is None and max_seqlen_kv is None:
-        if sageattn:
+        if sageattn is not None:
             return sageattn(q, k, v, tensor_layout='NHD')
-        if xformers_attn_func:
+
+        if flash_attn_func is not None:
+            q, orig_len = pad_to_multiple(q)
+            k, _ = pad_to_multiple(k)
+            v, _ = pad_to_multiple(v)
+            x = flash_attn_func(q, k, v, dropout_p=0.0, causal=False)
+            return x[:, :orig_len]
+
+        if xformers_attn_func is not None:
             return xformers_attn_func(q, k, v)
+
         return torch.nn.functional.scaled_dot_product_attention(
             q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         ).transpose(1, 2)
 
+    # Variable-length branch
     B, L, H, C = q.shape
+    batch_size = B
+
     q = q.view(B * L, H, C)
     k = k.view(B * L, H, C)
     v = v.view(B * L, H, C)
 
-    # Efficient fallback logic
-    if sageattn_varlen:
-        return sageattn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv).view(B, L, H, C)
+    if sageattn_varlen is not None:
+        x = sageattn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
+    elif flash_attn_varlen_func is not None:
+        x = flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
+    else:
+        raise NotImplementedError('No Attn Installed!')
 
-    if flash_attn_varlen_func and max_seqlen_q % 128 == 0 and max_seqlen_kv % 128 == 0:
-        return flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv).view(B, L, H, C)
-
-    if xformers_attn_func:
-        return xformers_attn_func(q.view(B, L, H, C), k.view(B, L, H, C), v.view(B, L, H, C))
-
-    return torch.nn.functional.scaled_dot_product_attention(
-        q.view(B, L, H, C).transpose(1, 2),
-        k.view(B, L, H, C).transpose(1, 2),
-        v.view(B, L, H, C).transpose(1, 2)
-    ).transpose(1, 2)
-    
+    return x.view(batch_size, max_seqlen_q, H, C)    
 
 class HunyuanAttnProcessorFlashAttnDouble:
     def __call__(self, attn, hidden_states, encoder_hidden_states, attention_mask, image_rotary_emb):
