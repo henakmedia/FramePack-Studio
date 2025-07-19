@@ -208,18 +208,22 @@ def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seq
         return x
 
     B, L, H, C = q.shape
+    batch_size = q.shape[0]
+    
+    q = q.view(q.shape[0] * q.shape[1], *q.shape[2:])
+    k = k.view(k.shape[0] * k.shape[1], *k.shape[2:])
+    v = v.view(v.shape[0] * v.shape[1], *v.shape[2:])
 
-    q = q.flatten(0, 1)
-    k = k.flatten(0, 1)
-    v = v.flatten(0, 1)
-
+    
     if sageattn_varlen is not None:
         x = sageattn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
     elif flash_attn_varlen_func is not None:
         x = flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
     else:
         raise NotImplementedError('No Attn Installed!')
-    x = x.unflatten(0, (B, L))
+
+    x = x.view(batch_size, max_seqlen_q, *x.shape[2:])
+    
     return x
 
 
